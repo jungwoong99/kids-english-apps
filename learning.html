@@ -566,6 +566,28 @@ main{flex:1 1 auto}
 .wactions .demo-btn:active{box-shadow:0 1px 0 #3E93C7}
 .wactions .demo-btn.playing{background:linear-gradient(160deg,#FFD9E2,#FF9FBA);color:#8A3A56;box-shadow:0 5px 0 #E8759B,0 10px 20px rgba(232,117,155,.22)}
 .wactions #wDone{flex:1 1 auto}
+/* ---------- 따라쓰기 유도 (가이드 유사도) ---------- */
+.paper-say{
+  position:absolute;left:9px;right:9px;top:7px;z-index:4;
+  display:flex;align-items:center;gap:6px;padding:5px 11px 5px 7px;
+  border-radius:16px;background:rgba(255,255,255,.98);
+  box-shadow:0 6px 20px rgba(96,74,140,.20),inset 0 0 0 2px #FFE3A6;
+  font-size:12px;font-weight:900;color:#5A5273;letter-spacing:-.45px;line-height:1.3;
+  opacity:0;transform:translateY(-8px) scale(.96);pointer-events:none;
+  transition:opacity .22s ease,transform .24s cubic-bezier(.3,1.4,.6,1);
+}
+.paper-say.show{opacity:1;transform:translateY(0) scale(1)}
+.paper-say .ps-av{flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:#FFF3D6;display:grid;place-items:center;overflow:hidden}
+.paper-say .ps-av svg{width:21px;height:21px;display:block}
+.paper-say.ok{box-shadow:0 6px 20px rgba(96,74,140,.20),inset 0 0 0 2px #A9EBCB}
+@keyframes demoNudge{
+  0%,100%{transform:translateX(0) scale(1)}
+  20%{transform:translateX(-3px) scale(1.05)}
+  40%{transform:translateX(3px) scale(1.05)}
+  60%{transform:translateX(-2px) scale(1.03)}
+  80%{transform:translateX(2px) scale(1.03)}
+}
+.wactions .demo-btn.nudge{animation:demoNudge .55s ease-in-out 4;box-shadow:0 0 0 3px rgba(255,201,74,.9),0 5px 0 #3E93C7,0 10px 20px rgba(62,147,199,.22)}
 
 /* ============ 반응형 ============ */
 @media (max-width:340px){
@@ -618,6 +640,9 @@ main{flex:1 1 auto}
   .dex-art{max-height:64px}
   .sheet-card{max-height:94dvh}
   .paper{height:clamp(176px,52vh,264px)}
+  .paper-say{font-size:10px;padding:3px 7px 3px 5px;border-radius:11px;top:4px;left:6px;right:6px;gap:4px}
+  .paper-say .ps-av{width:15px;height:15px}
+  .paper-say .ps-av svg{width:14px;height:14px}
   .write-top{margin:4px 0 6px}
   .wgroups{margin-bottom:5px}
   .wchip{min-width:40px;height:44px;font-size:17px}
@@ -2497,6 +2522,7 @@ main{flex:1 1 auto}
         +   '<div class="paper">'
         +     '<canvas id="writeCanvas" role="img" aria-label="글자를 손가락으로 따라 써 보세요"></canvas>'
         +     '<div class="write-stamp" id="writeStamp" aria-hidden="true">잘했어요! ⭐</div>'
+        +     '<div class="paper-say" id="writeSay" role="status" aria-live="polite"><span class="ps-av" aria-hidden="true"></span><span class="ps-t"></span></div>'
         +   '</div>'
         +   '<button class="paper-nav prev" id="wPrev" aria-label="이전 글자">◀</button>'
         +   '<button class="paper-nav next" id="wNext" aria-label="다음 글자">▶</button>'
@@ -2509,6 +2535,10 @@ main{flex:1 1 auto}
         +   '<button class="big-btn" id="wDone">✅ 다 썼어요!</button>'
         + '</div>';
 
+      this.stopHintFx(false);
+      this.fx = null;
+      var sayAv = document.querySelector('#writeSay .ps-av');
+      if (sayAv) { var pp = partner(); sayAv.innerHTML = pp && pp.svg ? pp.svg : ''; }
       this.canvas = document.getElementById('writeCanvas');
       this.ctx = null;
       this.rect = null;
@@ -2853,6 +2883,45 @@ main{flex:1 1 auto}
         }
       }
 
+      if (g && g.strokes.length && this.fx && this.fx.idx.length) {
+        // 놓친 획을 잠깐 반짝이게 해서 다시 따라 쓰도록 유도한다.
+        var nowMs = (window.performance && window.performance.now) ? window.performance.now() : Date.now();
+        var tt = (nowMs - this.fx.t0) / 1000;
+        var pulse = 0.5 + 0.5 * Math.sin(tt * 6.2);
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (var fi = 0; fi < this.fx.idx.length; fi++) {
+          var fst = g.strokes[this.fx.idx[fi]];
+          if (!fst || !fst.pts.length) continue;
+          ctx.strokeStyle = 'rgba(255,201,74,' + (0.5 + 0.35 * pulse).toFixed(3) + ')';
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.shadowColor = 'rgba(255,206,90,.9)';
+          ctx.shadowBlur = 14;
+          ctx.lineWidth = g.width * (1.0 + 0.32 * pulse);
+          if (fst.pts.length === 1) {
+            ctx.beginPath();
+            ctx.arc(fst.pts[0].x, fst.pts[0].y, ctx.lineWidth / 2, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            this.strokePoly(ctx, fst.pts);
+          }
+          for (var sk = 0; sk < 3; sk++) {
+            var sp = this.pointAlong(fst, ((tt * 0.55) + sk / 3 + fi * 0.17) % 1);
+            if (!sp) continue;
+            var rr = 2.4 + 2.2 * (0.5 + 0.5 * Math.sin(tt * 9 + sk * 2.1));
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, rr, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,255,255,.95)';
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = 'rgba(255,215,120,1)';
+            ctx.fill();
+            ctx.shadowBlur = 14;
+          }
+        }
+        ctx.restore();
+      }
+
       if (g && g.strokes.length && this.showHints) this.paintHints();
       ctx.restore();
     },
@@ -3009,6 +3078,267 @@ main{flex:1 1 auto}
         var mid = this.pointAlong(s, f);
         this.paintArrow(ctx, mid.x, mid.y, vx / vl, vy / vl, r);
       }
+    },
+
+    /* --- 따라쓰기 판정 (가이드 획 유사도) --- */
+    // 5세 손가락 오차를 넉넉히 두되, 막긋기·낙서·점찍기는 통과하지 못하게 잡은 기준
+    judgeRule: function () {
+      var s = (this.geom && this.geom.scale) ? this.geom.scale : Math.max(1, Math.min(this.w, this.h)) * 0.66;
+      return {
+        tol: Math.max(15, s * 0.115),     // 가이드 점을 '따라온' 것으로 보는 반경(px)
+        off: Math.max(26, s * 0.26),      // 이보다 멀면 '글자 밖 낙서'
+        cov: 0.60,                        // 가이드 커버리지 합격선(60%)
+        strokeMin: 0.55,                  // 획마다 최소한 이만큼은 따라와야 함
+        offMax: 0.34,                     // 이탈(낙서) 허용 비율
+        inkMin: 0.60,                     // 가이드 길이 대비 그린 길이 하한
+        inkMax: 2.4                       // 가이드 길이 대비 그린 길이 상한(덧그리기)
+      };
+    },
+
+    // 가이드 획을 일정 간격으로 샘플링한다. (각 점이 어느 획에서 왔는지 함께 보관)
+    guideSamples: function () {
+      var g = this.geom, out = [], i, j, k;
+      if (!g || !g.strokes.length) return out;
+      var step = Math.max(4, g.scale * 0.04);
+      for (i = 0; i < g.strokes.length; i++) {
+        var st = g.strokes[i], pts = st.pts;
+        if (!pts.length) continue;
+        if (pts.length === 1 || st.len <= 0) { out.push({ x: pts[0].x, y: pts[0].y, i: i }); continue; }
+        var n = Math.max(2, Math.ceil(st.len / step));
+        for (k = 0; k <= n; k++) {
+          var p = this.pointAlong(st, k / n);
+          if (p) out.push({ x: p.x, y: p.y, i: i });
+        }
+      }
+      return out;
+    },
+
+    inkData: function () {
+      var segs = [], dots = [], pts = [], len = 0, i, j, p, dx, dy;
+      for (i = 0; i < this.strokes.length; i++) {
+        p = (this.strokes[i] && this.strokes[i].points) || [];
+        for (j = 0; j < p.length; j++) pts.push(p[j]);
+        if (p.length === 1) dots.push(p[0]);
+        for (j = 1; j < p.length; j++) {
+          segs.push({ a: p[j - 1], b: p[j] });
+          dx = p[j].x - p[j - 1].x; dy = p[j].y - p[j - 1].y;
+          len += Math.sqrt(dx * dx + dy * dy);
+        }
+      }
+      return { segs: segs, dots: dots, pts: pts, len: len };
+    },
+
+    distToInk: function (p, ink) {
+      var best = 1e9, i, d, dx, dy;
+      for (i = 0; i < ink.dots.length; i++) {
+        dx = p.x - ink.dots[i].x; dy = p.y - ink.dots[i].y;
+        d = Math.sqrt(dx * dx + dy * dy);
+        if (d < best) best = d;
+      }
+      for (i = 0; i < ink.segs.length; i++) {
+        d = this.segDist(p, ink.segs[i].a, ink.segs[i].b);
+        if (d < best) best = d;
+      }
+      return best;
+    },
+
+    distToGuide: function (p) {
+      var g = this.geom, best = 1e9, i, j, d, dx, dy, pts;
+      if (!g) return best;
+      for (i = 0; i < g.strokes.length; i++) {
+        pts = g.strokes[i].pts;
+        if (pts.length === 1) {
+          dx = p.x - pts[0].x; dy = p.y - pts[0].y;
+          d = Math.sqrt(dx * dx + dy * dy);
+          if (d < best) best = d;
+        }
+        for (j = 1; j < pts.length; j++) {
+          d = this.segDist(p, pts[j - 1], pts[j]);
+          if (d < best) best = d;
+        }
+      }
+      return best;
+    },
+
+    evaluate: function () {
+      this.buildGeom();
+      var g = this.geom;
+      var rule = this.judgeRule();
+      var res = {
+        ok: false, verdict: 'empty', coverage: 0, offRatio: 0,
+        ink: 0, guide: 0, missed: [], strokeCoverage: [], rule: rule
+      };
+      res.strokes = this.strokes.length;
+      var ink = this.inkData(), i;
+      res.ink = ink.len;
+      res.points = ink.pts.length;
+      if (!g || !g.strokes.length) {
+        // 안내 획 데이터가 없는 글자는 모양을 견줄 수 없으니 그린 것만으로 통과시킨다.
+        res.verdict = ink.pts.length ? 'nodata' : 'empty';
+        res.ok = res.verdict === 'nodata';
+        return res;
+      }
+      var guideLen = 0;
+      for (i = 0; i < g.strokes.length; i++) guideLen += g.strokes[i].len;
+      res.guide = guideLen;
+      if (!this.strokes.length || !ink.pts.length) {
+        for (i = 0; i < g.strokes.length; i++) res.missed.push(i);
+        res.verdict = 'empty';
+        return res;
+      }
+      var samples = this.guideSamples(), hitN = 0, per = [], rec;
+      for (i = 0; i < g.strokes.length; i++) per.push({ n: 0, hit: 0 });
+      for (i = 0; i < samples.length; i++) {
+        rec = per[samples[i].i];
+        rec.n++;
+        if (this.distToInk(samples[i], ink) <= rule.tol) { rec.hit++; hitN++; }
+      }
+      res.coverage = samples.length ? hitN / samples.length : 0;
+      var offN = 0;
+      for (i = 0; i < ink.pts.length; i++) if (this.distToGuide(ink.pts[i]) > rule.off) offN++;
+      res.offRatio = ink.pts.length ? offN / ink.pts.length : 0;
+      var everyStroke = true;
+      for (i = 0; i < per.length; i++) {
+        var c = per[i].n ? per[i].hit / per[i].n : 1;
+        res.strokeCoverage.push(c);
+        if (c < rule.strokeMin) { res.missed.push(i); everyStroke = false; }
+      }
+      // 획의 시작과 끝까지 따라왔는지 (중간에 멈춘 획은 안 됨)
+      var endsOk = true;
+      for (i = 0; i < g.strokes.length; i++) {
+        var gst = g.strokes[i];
+        if (!gst.pts.length) continue;
+        var ep0 = this.pointAlong(gst, 0), ep1 = this.pointAlong(gst, 1);
+        var endTol = rule.tol * 1.4;
+        if ((ep0 && this.distToInk(ep0, ink) > endTol) || (ep1 && this.distToInk(ep1, ink) > endTol)) {
+          endsOk = false;
+          if (res.missed.indexOf(i) === -1) res.missed.push(i);
+        }
+      }
+      var covOk = res.coverage >= rule.cov;
+      var inkOk = guideLen <= 0 ? true : (ink.len >= guideLen * rule.inkMin);
+      if (res.offRatio > rule.offMax) {
+        // 글자 밖에 막 낙서한 경우
+        res.verdict = 'off';
+        res.missed = [];
+        for (i = 0; i < g.strokes.length; i++) res.missed.push(i);
+      } else if (guideLen > 0 && ink.len > guideLen * rule.inkMax) {
+        // 글자 위를 마구 덧그린 경우
+        res.verdict = 'messy';
+        res.missed = [];
+        for (i = 0; i < g.strokes.length; i++) res.missed.push(i);
+      } else if (covOk && inkOk && everyStroke && endsOk) {
+        res.verdict = 'ok';
+        res.ok = true;
+        res.missed = [];
+      } else if (res.coverage < rule.cov * 0.55 && ink.len < guideLen * rule.inkMin * 0.7) {
+        res.verdict = 'short';
+      } else {
+        res.verdict = 'shape';
+      }
+      if (!res.ok && res.verdict !== 'off' && res.verdict !== 'messy' && !res.missed.length && res.strokeCoverage.length) {
+        var low = 0, lowC = 2;
+        for (i = 0; i < res.strokeCoverage.length; i++) if (res.strokeCoverage[i] < lowC) { lowC = res.strokeCoverage[i]; low = i; }
+        res.missed.push(low);
+      }
+      return res;
+    },
+
+    /* --- 유도 말풍선 · 획 반짝임 · 버튼 흔들기 --- */
+    sayBox: function (text, mood) {
+      var el = document.getElementById('writeSay');
+      if (!el) return;
+      var t = el.querySelector('.ps-t'), av = el.querySelector('.ps-av');
+      if (av && !av.firstChild) { var pp = partner(); if (pp && pp.svg) av.innerHTML = pp.svg; }
+      if (t) t.textContent = text || '';
+      el.classList.toggle('ok', mood === 'ok');
+      el.classList.remove('show');
+      void el.offsetWidth;
+      el.classList.add('show');
+      if (this.sayTimer) clearTimeout(this.sayTimer);
+      this.sayTimer = setTimeout(function () {
+        var e2 = document.getElementById('writeSay');
+        if (e2) e2.classList.remove('show');
+      }, mood === 'ok' ? 2400 : 4800);
+    },
+
+    hideSay: function () {
+      var el = document.getElementById('writeSay');
+      if (el) el.classList.remove('show');
+      if (this.sayTimer) { clearTimeout(this.sayTimer); this.sayTimer = null; }
+    },
+
+    nudgeDemo: function () {
+      var b = document.getElementById('wDemo');
+      if (!b) return;
+      b.classList.remove('nudge');
+      void b.offsetWidth;
+      b.classList.add('nudge');
+      if (this.nudgeTimer) clearTimeout(this.nudgeTimer);
+      this.nudgeTimer = setTimeout(function () { if (b) b.classList.remove('nudge'); }, 2400);
+    },
+
+    startHintFx: function (idx, ms) {
+      var self = this;
+      this.stopHintFx(false);
+      if (!idx || !idx.length) return;
+      this.fx = { idx: idx.slice(0), t0: this.nowMs(), until: ms || 2700 };
+      var raf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window)
+        : function (f) { return setTimeout(function () { f(self.nowMs()); }, 16); };
+      var step = function (ts) {
+        if (!self.fx) return;
+        self.repaint();
+        if (ts - self.fx.t0 > self.fx.until) {
+          self.fx = null; self.fxRaf = null; self.repaint(); return;
+        }
+        self.fxRaf = raf(step);
+      };
+      this.fxRaf = raf(step);
+      this.repaint();
+    },
+
+    stopHintFx: function (redraw) {
+      if (this.fxRaf) { try { cancelAnimationFrame(this.fxRaf); } catch (e) {} }
+      this.fxRaf = null;
+      this.fx = null;
+      if (redraw !== false) this.repaint();
+    },
+
+    nowMs: function () { return (window.performance && window.performance.now) ? window.performance.now() : Date.now(); },
+
+    giveHint: function (res) {
+      if (this.demo) this.stopDemo(false);
+      var msg, say;
+      if (res.verdict === 'empty' || res.verdict === 'nodata') {
+        msg = '점선 위에 손가락을 대고 쓱~ 그려 볼까? ✍️';
+        say = '점선 위에 손가락으로 써 볼까요?';
+      } else if (res.verdict === 'short') {
+        msg = '아직 조금 덜 썼어요! 점선을 따라 쓱쓱 그려볼까?';
+        say = '점선을 따라 조금 더 써 볼까요?';
+      } else if (res.verdict === 'off') {
+        msg = '글자 점선 위를 천천히 따라 써볼까요? 👀';
+        say = '점선 위를 천천히 따라 써 볼까요?';
+      } else if (res.verdict === 'messy') {
+        msg = '조금만 천천히! 점선 위로만 쓱쓱 그려 볼까?';
+        say = '점선 위로만 천천히 그려 볼까요?';
+      } else {
+        msg = '거의 다 왔어요! 반짝이는 획을 다시 따라 써 볼까?';
+        say = '반짝이는 획을 다시 따라 써 볼까요?';
+      }
+      this.sayBox(msg, 'hint');
+      var p = partner();
+      partnerSay(((p && p.cry) ? p.cry + ' ' : '') + msg, 'sad', '✍️ 점선을 따라 써 볼까?');
+      var idx = (res && res.missed && res.missed.length) ? res.missed : null;
+      if (!idx && this.geom && this.geom.strokes) {
+        idx = [];
+        for (var i = 0; i < this.geom.strokes.length; i++) idx.push(i);
+      }
+      this.startHintFx(idx);
+      this.nudgeDemo();
+      Sfx.pop();
+      Speech.stop();
+      Speech.sayKo(say, { rate: 0.92 });
+      vibrate(8);
     },
 
     /* --- 획순 시범 재생 --- */
@@ -3177,6 +3507,8 @@ main{flex:1 1 auto}
 
     clearInk: function () {
       if (this.demo) this.stopDemo(false);
+      this.stopHintFx(false);
+      this.hideSay();
       this.strokes = [];
       this.drawn = false;
       this.repaint();
@@ -3274,12 +3606,15 @@ main{flex:1 1 auto}
     complete: function () {
       var it = this.item();
       if (!it) return;
-      if (!this.drawn) {
-        Sfx.click();
-        partnerSay('먼저 글자를 손가락으로 써 봐!', 'sad');
-        toast('글자를 먼저 따라 써 보세요 ✍️');
+      // 가이드 획과 비슷하게 따라 썼는지 먼저 판정한다.
+      var res = this.evaluate();
+      if (!res.ok) {
+        this.drawn = false;
+        this.giveHint(res);
         return;
       }
+      this.stopHintFx(false);
+      this.hideSay();
       this.drawn = false;
       var key = this.key();
       var isNew = state.wrote.indexOf(key) === -1;
@@ -3297,6 +3632,7 @@ main{flex:1 1 auto}
       partnerSay(rand(lines).replace('{cry}', p.cry), 'happy', '✍️ 다음 글자도 써 볼까?');
       Speech.sayKo(rand(['잘 썼어요!', '멋져요!', '참 잘했어요!']), { rate: 0.9 });
       this.showStamp();
+      this.sayBox(p.cry + ' 따라 쓰기 성공!', 'ok');
       this.renderChrome();
       addStar();
     },
@@ -3570,7 +3906,7 @@ main{flex:1 1 auto}
   }
 
   // 화면에는 보이지 않는 테스트용 연결고리
-  window.kidsApp = { Write: Write, examples: LETTER_EXAMPLES };
+  window.kidsApp = { Write: Write, Quiz: Quiz, examples: LETTER_EXAMPLES };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
