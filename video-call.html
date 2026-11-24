@@ -1066,10 +1066,25 @@ body.hide-ko .bubble-ko{display:none}
     setTalking(false);
   }
   var speakGen = 0;
-  function speak(text) {
+  function speak(text, onDone) {
     text = String(text);
-    var dur = 1050 + text.length * 78;
+    var dur = 1050 + text.length * 78;                       /* 입 모양 애니메이션용 길이 */
+    var est = 1200 + text.length * 95;                       /* 발화 추정 시간 */
+    if (est < 3400) est = 3400;
+    if (est > 7500) est = 7500;
     var gen = ++speakGen;
+    var doneTimer = null, doneSaid = false;
+    function fireDone() {
+      /* 취소·새 발화·통화 종료로 세대가 바뀌면 콜백을 버린다 (한 번만) */
+      if (doneSaid || gen !== speakGen) return;
+      doneSaid = true;
+      if (typeof onDone === 'function') { try { onDone(); } catch (e) {} }
+    }
+    function armEstimate() {
+      /* onend 가 오지 않거나 너무 일찍 오는 기기: 추정 시간 뒤 반드시 진행 */
+      clearTimeout(doneTimer);
+      doneTimer = setTimeout(fireDone, est);
+    }
     // 앱 목소리가 켜진 마이크로 들어가 스스로 답하게 되는 일을 막는다
     stopListening();
     state.lastSpoken = text;
@@ -1077,6 +1092,7 @@ body.hide-ko .bubble-ko{display:none}
     setTalking(true);
     clearTimeout(talkTimer);
     talkTimer = setTimeout(function () { if (gen === speakGen) setTalking(false); }, dur);
+    if (typeof onDone === 'function') armEstimate();
     if (!synth) return dur;
     var sentAt = 0, startedAt = 0;
     function utter() {
@@ -1090,13 +1106,17 @@ body.hide-ko .bubble-ko{display:none}
         u.volume = 1;
         if (voice) u.voice = voice;
         u.onstart = function () { if (gen === speakGen) { startedAt = Date.now(); setTalking(true); } };
-        // 안드로이드 크롬 일부는 onend/onerror 를 즉시 보낸다.
-        // 이 콜백은 입 모양만 끄고, 화면 진행(턴)에는 절대 관여하지 않는다.
+        // 안드로이드 크롬 일부는 onend/onerror 를 즉시 보낸다. 600ms 미만이면 발화로 치지 않는다.
         u.onend = u.onerror = function () {
           if (gen !== speakGen) return;
-          if (Date.now() - (startedAt || sentAt) < 600) return; /* 음성 엔진 없음/즉시 종료: 타이머로 계속 */
+          if (Date.now() - (startedAt || sentAt) < 600) return; /* 음성 엔진 없음/즉시 종료: 추정 시간까지 기다린다 */
           clearTimeout(talkTimer);
           setTalking(false);
+          /* 실제로 말이 끝난 뒤 숨 고르고 다음으로 — 말이 잘리지 않게 */
+          if (typeof onDone === 'function' && !doneSaid) {
+            clearTimeout(doneTimer);
+            doneTimer = setTimeout(fireDone, 350);
+          }
         };
         synth.speak(u);
       } catch (e) { /* 음성 없이도 자막·효과음으로 진행 */ }
@@ -1337,14 +1357,13 @@ body.hide-ko .bubble-ko{display:none}
     setBubble(c.greet.en, c.greet.ko);
     state.lastLine = c.greet.en;
     state.lastKo = c.greet.ko;
-    speak(c.greet.en);
     state.stepIdx = 0;
     updateTurns();
-    /* 인사말을 듣고 첫 질문으로: 통화 세대가 그대로일 때만 */
+    /* 인사말이 끝까지 재생된 뒤에 첫 질문으로: 통화 세대가 그대로일 때만 */
     clearTimeout(state.nextTimer);
-    state.nextTimer = setTimeout(function () {
+    speak(c.greet.en, function () {
       if (gen === state.gen && state.callActive && !state.busy) renderStep(gen);
-    }, 2600);
+    });
   }
 
   /* =====================================================
